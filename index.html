@@ -38,7 +38,6 @@
       padding-bottom: 60px;
     }
 
-    /* Top Header */
     .site-header {
       position: sticky;
       top: 0;
@@ -117,7 +116,6 @@
       }
     }
 
-    /* Controls */
     .controls-row {
       display: flex;
       gap: 8px;
@@ -151,7 +149,6 @@
       cursor: pointer;
     }
 
-    /* Feed Container */
     .feed {
       max-width: 680px;
       margin: 20px auto 0;
@@ -161,7 +158,6 @@
       gap: 16px;
     }
 
-    /* Card Style */
     .berriz-card {
       background: var(--bg-card);
       border: 1px solid var(--border-subtle);
@@ -179,11 +175,20 @@
       margin-bottom: 12px;
     }
 
-    /* BERRIZ ARTIST HEADER */
     .artist-header {
       display: flex;
       align-items: center;
       gap: 12px;
+    }
+
+    .artist-header.compact .artist-avatar-wrap {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+    }
+
+    .artist-header.compact .artist-name {
+      font-size: 0.9rem;
     }
 
     .artist-avatar-wrap {
@@ -258,12 +263,11 @@
       font-variant-numeric: tabular-nums;
     }
 
-    /* Post / Comment Content */
     .content-block {
-      margin-top: 14px;
+      margin-top: 12px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
     }
 
     .text-kr {
@@ -281,12 +285,15 @@
       border-left: 2px solid var(--badge-purple);
     }
 
-    /* Media Grids (Artist & Fan) */
     .media-grid {
       margin-top: 12px;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
+    }
+
+    .media-grid.two-img {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .media-grid.single-img {
@@ -307,7 +314,6 @@
       opacity: 0.92;
     }
 
-    /* Fan Context Box (for Comments on Fan Posts & Replies) */
     .fan-context {
       background: var(--bg-subcard);
       border: 1px solid var(--border-subtle);
@@ -343,7 +349,61 @@
       max-height: 260px;
     }
 
-    /* Lightbox Modal */
+    /* Threaded Fan Comments + Artist Replies inside a Post */
+    .post-thread {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .thread-heading {
+      font-size: 0.74rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .thread-item {
+      background: var(--bg-subcard);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
+    .fan-comment-block .fan-author {
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: #f5f5f7;
+    }
+
+    .fan-comment-block .fan-date {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
+    .artist-reply-nested {
+      margin-top: 10px;
+      padding-top: 10px;
+      padding-left: 12px;
+      border-top: 1px dashed var(--border-subtle);
+      border-left: 2px solid var(--badge-purple);
+    }
+
+    .reply-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #ff80bd;
+      margin-bottom: 6px;
+    }
+
     .lightbox {
       position: fixed;
       inset: 0;
@@ -421,7 +481,6 @@
     <div class="status-state">Loading translations from Google Sheets...</div>
   </main>
 
-  <!-- Full-screen image preview -->
   <div class="lightbox" id="lightbox">
     <img id="lightboxImg" src="" alt="Full view" />
   </div>
@@ -461,6 +520,10 @@
 
     function cleanCell(value) {
       return String(value ?? "").trim();
+    }
+
+    function normalizeId(val) {
+      return cleanCell(val).replace(/\.0+$/, "").toLowerCase();
     }
 
     function firstValue(row, aliases) {
@@ -559,8 +622,8 @@
           if (avatar) MEMBERS[key].avatar = normalizeAvatarUrl(avatar);
         });
 
-        ARCHIVE_DATA = archiveRows
-          .filter(r => r.member && (r.kr || r.en || r.images))
+        const parsedRows = archiveRows
+          .filter(r => r.member && (r.kr || r.en || r.images || r.fan_kr || r.fan_en || r.fan_images))
           .map(r => {
             const fanAuthor = firstValue(r, ["fan_author", "fan_name", "fan", "author", "op"]);
             const fanKr = firstValue(r, ["fan_kr", "fan_post_kr", "fan_post", "fan_text_kr", "fan_comment_kr", "op_kr"]);
@@ -568,10 +631,18 @@
             const rawFanImages = firstValue(r, ["fan_images", "fan_image", "fan_post_images", "fan_post_image", "fan_img", "op_images"]);
             const fanImages = parseImageList(rawFanImages);
             const hasFanContext = Boolean(fanKr || fanEn || fanImages.length > 0);
+            const parentId = normalizeId(firstValue(r, ["parent_id", "post_id", "parent", "reply_to_id", "thread_id"]));
+            const rawType = cleanCell(r.type).toLowerCase();
+
+            let normalizedType = "post";
+            if (rawType.includes("reply")) normalizedType = "reply";
+            else if (rawType.includes("comment")) normalizedType = "comment";
+            else if (rawType.includes("post") || !rawType) normalizedType = "post";
 
             return {
-              id: r.id || "",
-              type: (r.type || "post").trim().toLowerCase(),
+              id: normalizeId(firstValue(r, ["id", "post_no", "no"])),
+              parentId,
+              type: normalizedType,
               member: memberKeyFromValue(r.member) || r.member.trim().toLowerCase(),
               date: (r.date || "").trim(),
               kr: r.kr || "",
@@ -582,11 +653,28 @@
                 kr: fanKr,
                 en: fanEn,
                 images: fanImages
-              } : null
+              } : null,
+              threadItems: []
             };
-          })
-          .reverse();
+          });
 
+        const postsById = new Map();
+        parsedRows.forEach(item => {
+          if (item.id && !item.parentId) {
+            postsById.set(item.id, item);
+          }
+        });
+
+        const topLevelItems = [];
+        parsedRows.forEach(item => {
+          if (item.parentId && postsById.has(item.parentId)) {
+            postsById.get(item.parentId).threadItems.push(item);
+          } else {
+            topLevelItems.push(item);
+          }
+        });
+
+        ARCHIVE_DATA = topLevelItems.reverse();
         renderFeed();
       } catch (err) {
         console.error("Archive loading error:", err);
@@ -621,12 +709,12 @@
       return `${m.kr} · ${m.en}`;
     }
 
-    function renderArtistHeader(memberKey, date) {
+    function renderArtistHeader(memberKey, date, compact = false) {
       const m = MEMBERS[memberKey] || { kr: memberKey, en: memberKey, avatar: "" };
       const avatarUrl = normalizeAvatarUrl(m.avatar);
       const initials = getMemberInitials(m);
       return `
-        <div class="artist-header">
+        <div class="artist-header ${compact ? "compact" : ""}">
           <div class="artist-avatar-wrap">
             <img class="artist-avatar"
                  src="${escapeHtml(avatarUrl)}"
@@ -661,10 +749,44 @@
 
     function renderImages(imageList, altLabel) {
       if (!imageList || imageList.length === 0) return "";
-      const singleClass = imageList.length === 1 ? "single-img" : "";
+      const layoutClass =
+        imageList.length === 1 ? "single-img" :
+        imageList.length === 2 ? "two-img" : "";
       return `
-        <div class="media-grid ${singleClass}">
+        <div class="media-grid ${layoutClass}">
           ${imageList.map(src => `<img src="${escapeHtml(src)}" alt="${escapeHtml(altLabel)}" loading="lazy" data-zoom="${escapeHtml(src)}" />`).join("")}
+        </div>
+      `;
+    }
+
+    function renderThreadItem(child) {
+      const fan = child.fanContext;
+      const showFanKr = fan && (langMode === "both" || langMode === "kr") && fan.kr;
+      const showFanEn = fan && (langMode === "both" || langMode === "en") && fan.en;
+      const hasArtistReply = Boolean(child.kr || child.en || (child.images && child.images.length > 0));
+
+      return `
+        <div class="thread-item">
+          ${fan ? `
+            <div class="fan-comment-block">
+              <div>
+                <span class="fan-author">${escapeHtml(fan.author)}</span>
+                ${child.date ? `<span class="fan-date">${escapeHtml(child.date)}</span>` : ""}
+              </div>
+              ${showFanKr ? `<div class="text-kr" style="margin-top:6px;">${escapeHtml(fan.kr)}</div>` : ""}
+              ${showFanEn ? `<div class="text-en" style="margin-top:6px;">${escapeHtml(fan.en)}</div>` : ""}
+              ${renderImages(fan.images, "Fan comment attachment")}
+            </div>
+          ` : ""}
+
+          ${hasArtistReply ? `
+            <div class="${fan ? "artist-reply-nested" : ""}">
+              <span class="reply-badge">Artist Reply</span>
+              ${renderArtistHeader(child.member, child.date, true)}
+              ${renderText(child.kr, child.en)}
+              ${renderImages(child.images, "Artist reply attachment")}
+            </div>
+          ` : ""}
         </div>
       `;
     }
@@ -674,13 +796,20 @@
       const q = searchQuery.trim().toLowerCase();
 
       const filtered = ARCHIVE_DATA.filter(item => {
-        const matchesMember = activeMember === "all" || item.member === activeMember;
+        const threadMatchesMember = activeMember === "all" ||
+          item.member === activeMember ||
+          (item.threadItems && item.threadItems.some(c => c.member === activeMember));
+
         const matchesType = activeType === "all" || item.type === activeType;
 
-        if (!matchesMember || !matchesType) return false;
+        if (!threadMatchesMember || !matchesType) return false;
         if (!q) return true;
 
         const memberInfo = MEMBERS[item.member];
+        const threadText = (item.threadItems || []).flatMap(c => [
+          c.kr, c.en, c.fanContext?.author, c.fanContext?.kr, c.fanContext?.en
+        ]);
+
         const searchable = [
           item.kr,
           item.en,
@@ -688,7 +817,8 @@
           memberInfo?.kr,
           memberInfo?.en,
           item.fanContext?.kr,
-          item.fanContext?.en
+          item.fanContext?.en,
+          ...threadText
         ].filter(Boolean).join(" ").toLowerCase();
 
         return searchable.includes(q);
@@ -704,9 +834,8 @@
           item.type === "post" ? "Artist Post" :
           item.type === "comment" ? "Artist Comment" : "Artist Reply";
 
-        // Render fan post/comment box whenever fanContext exists (for both "comment" and "reply")
         let fanQuoteHtml = "";
-        if (item.fanContext) {
+        if (!item.threadItems?.length && item.fanContext) {
           const showFanKr = (langMode === "both" || langMode === "kr") && item.fanContext.kr;
           const showFanEn = (langMode === "both" || langMode === "en") && item.fanContext.en;
           const contextHeader = item.type === "comment"
@@ -723,6 +852,16 @@
           `;
         }
 
+        let threadHtml = "";
+        if (item.threadItems && item.threadItems.length > 0) {
+          threadHtml = `
+            <div class="post-thread">
+              <div class="thread-heading">Comments &amp; Artist Replies (${item.threadItems.length})</div>
+              ${item.threadItems.map(renderThreadItem).join("")}
+            </div>
+          `;
+        }
+
         return `
           <article class="berriz-card">
             <span class="card-type-label">${typeLabel}</span>
@@ -730,12 +869,12 @@
             ${renderArtistHeader(item.member, item.date)}
             ${renderText(item.kr, item.en)}
             ${renderImages(item.images, "Artist attachment")}
+            ${threadHtml}
           </article>
         `;
       }).join("");
     }
 
-    // Lightbox click handler
     const lightbox = document.getElementById("lightbox");
     const lightboxImg = document.getElementById("lightboxImg");
 
@@ -751,7 +890,6 @@
       lightboxImg.src = "";
     });
 
-    // Filter & Display Listeners
     document.getElementById("memberFilterSelect").addEventListener("change", (e) => {
       activeMember = e.target.value;
       renderFeed();
