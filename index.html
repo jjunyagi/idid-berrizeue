@@ -151,43 +151,6 @@
       cursor: pointer;
     }
 
-    /* Member Filter Pills */
-    .member-filters {
-      display: flex;
-      gap: 6px;
-      overflow-x: auto;
-      padding-bottom: 4px;
-      scrollbar-width: none;
-    }
-
-    .member-filters::-webkit-scrollbar {
-      display: none;
-    }
-
-    .filter-pill {
-      background: var(--bg-pill);
-      color: var(--text-secondary);
-      border: 1px solid var(--border-subtle);
-      border-radius: 999px;
-      padding: 5px 12px;
-      font-size: 0.8rem;
-      font-weight: 500;
-      white-space: nowrap;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .filter-pill:hover {
-      border-color: #444;
-    }
-
-    .filter-pill.active {
-      background: var(--bg-pill-active);
-      color: #fff;
-      border-color: var(--bg-pill-active);
-      font-weight: 600;
-    }
-
     /* Feed Container */
     .feed {
       max-width: 680px;
@@ -344,7 +307,7 @@
       opacity: 0.92;
     }
 
-    /* Fan Context Box (for Replies) */
+    /* Fan Context Box (for Comments on Fan Posts & Replies) */
     .fan-context {
       background: var(--bg-subcard);
       border: 1px solid var(--border-subtle);
@@ -451,7 +414,6 @@
           <option value="kr">Korean Only</option>
         </select>
       </div>
-
     </div>
   </header>
 
@@ -465,9 +427,6 @@
   </div>
 
   <script>
-    // ==========================================
-    // 1. PASTE YOUR GOOGLE SHEET ID HERE
-    // ==========================================
     const SHEET_ID = "1DPQ6k2ez6VuRTeipaPxEHuDBmd76B4dlKt21NTdbgDI";
 
     let MEMBERS = {
@@ -482,20 +441,17 @@
 
     let ARCHIVE_DATA = [];
 
-    // Clean and normalize URLs from the Members sheet.
     function normalizeAvatarUrl(rawUrl) {
       let url = String(rawUrl || "").trim();
       if (!url) return "";
       if (url.startsWith("//")) url = "https:" + url;
 
-      // Google Drive sharing URLs need the file ID converted to a display URL.
       let match = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/i)
         || url.match(/[?&]id=([^&]+)/i);
       if (url.includes("drive.google.com") && match) {
         return `https://drive.google.com/uc?export=view&id=${match[1]}`;
       }
 
-      // Imgur page links are not image files; convert common album/image pages.
       if (/^https?:\/\/(www\.)?imgur\.com\/[a-zA-Z0-9]+$/.test(url)) {
         const id = url.split("/").pop();
         return `https://i.imgur.com/${id}.png`;
@@ -544,7 +500,7 @@
       if (!raw) return [];
       return raw
         .split(/[\n,]+/)
-        .map(u => u.trim())
+        .map(u => normalizeAvatarUrl(u.trim()))
         .filter(Boolean);
     }
 
@@ -556,7 +512,7 @@
       const jsonStart = responseText.indexOf("{");
       const jsonEnd = responseText.lastIndexOf("}");
       if (jsonStart < 0 || jsonEnd <= jsonStart) {
-        throw new Error(`Could not read the Google Sheets response for tab "${tabName}". Check that the sheet is shared and the tab name is correct.`);
+        throw new Error(`Could not read the Google Sheets response for tab "${tabName}".`);
       }
       const data = JSON.parse(responseText.slice(jsonStart, jsonEnd + 1));
       if (data.status === "error") {
@@ -581,24 +537,15 @@
       const container = document.getElementById("feedContainer");
       container.innerHTML = `<div class="status-state">Loading translations and member profiles...</div>`;
 
-      if (!SHEET_ID || SHEET_ID === "PASTE_YOUR_GOOGLE_SHEET_ID_HERE") {
-        container.innerHTML = `<div class="status-state">Please set your <b>SHEET_ID</b> in the script.</div>`;
-        return;
-      }
-
       try {
-        // Archive is essential. Members is optional because default member names are built in.
         const archiveRows = await fetchSheetTab("Archive");
         let memberRows = [];
-        let memberSheetWarning = "";
         try {
           memberRows = await fetchSheetTab("Members");
         } catch (memberError) {
           console.error("Members tab could not be loaded:", memberError);
-          memberSheetWarning = `Member profile sheet could not be loaded: ${escapeHtml(memberError.message)}. Showing initials until this is fixed.`;
         }
 
-        let matchedMemberRows = 0;
         memberRows.forEach(row => {
           const rawKey = firstValue(row, ["key", "member", "member_key", "id", "name", "artist"]);
           const key = memberKeyFromValue(rawKey);
@@ -610,14 +557,18 @@
           if (korean) MEMBERS[key].kr = korean;
           if (english) MEMBERS[key].en = english;
           if (avatar) MEMBERS[key].avatar = normalizeAvatarUrl(avatar);
-          matchedMemberRows++;
         });
 
         ARCHIVE_DATA = archiveRows
           .filter(r => r.member && (r.kr || r.en || r.images))
           .map(r => {
-            const fanImages = parseImageList(r.fan_images);
-            const hasFanContext = r.fan_kr || r.fan_en || fanImages.length > 0;
+            const fanAuthor = firstValue(r, ["fan_author", "fan_name", "fan", "author", "op"]);
+            const fanKr = firstValue(r, ["fan_kr", "fan_post_kr", "fan_post", "fan_text_kr", "fan_comment_kr", "op_kr"]);
+            const fanEn = firstValue(r, ["fan_en", "fan_post_en", "fan_translation", "fan_text_en", "fan_comment_en", "op_en"]);
+            const rawFanImages = firstValue(r, ["fan_images", "fan_image", "fan_post_images", "fan_post_image", "fan_img", "op_images"]);
+            const fanImages = parseImageList(rawFanImages);
+            const hasFanContext = Boolean(fanKr || fanEn || fanImages.length > 0);
+
             return {
               id: r.id || "",
               type: (r.type || "post").trim().toLowerCase(),
@@ -627,9 +578,9 @@
               en: r.en || "",
               images: parseImageList(r.images),
               fanContext: hasFanContext ? {
-                author: (r.fan_author || "WITHID").trim(),
-                kr: r.fan_kr || "",
-                en: r.fan_en || "",
+                author: fanAuthor || "WITHID",
+                kr: fanKr,
+                en: fanEn,
                 images: fanImages
               } : null
             };
@@ -637,12 +588,6 @@
           .reverse();
 
         renderFeed();
-
-        if (memberSheetWarning) {
-          container.insertAdjacentHTML("afterbegin", `<div class="status-state" style="padding:12px 16px;color:#ff80bd;font-size:.82rem">${memberSheetWarning}</div>`);
-        } else if (memberRows.length && !matchedMemberRows) {
-          container.insertAdjacentHTML("afterbegin", `<div class="status-state" style="padding:12px 16px;color:#ff80bd;font-size:.82rem">Members tab loaded, but none of its rows matched the seven member keys. Check the first column (key/member/name) and its values.</div>`);
-        }
       } catch (err) {
         console.error("Archive loading error:", err);
         container.innerHTML = `
@@ -688,7 +633,7 @@
                  alt="${escapeHtml(m.en || m.kr || memberKey)}"
                  loading="lazy"
                  ${avatarUrl ? "" : "hidden"}
-                 onerror="this.hidden=true; this.nextElementSibling.hidden=false; this.nextElementSibling.title='Avatar failed to load. Check that the image URL is public and direct.'" />
+                 onerror="this.hidden=true; this.nextElementSibling.hidden=false;" />
             <span class="artist-avatar-fallback" ${avatarUrl ? "hidden" : ""}>${escapeHtml(initials)}</span>
           </div>
           <div class="artist-meta">
@@ -759,14 +704,18 @@
           item.type === "post" ? "Artist Post" :
           item.type === "comment" ? "Artist Comment" : "Artist Reply";
 
+        // Render fan post/comment box whenever fanContext exists (for both "comment" and "reply")
         let fanQuoteHtml = "";
-        if (item.type === "reply" && item.fanContext) {
+        if (item.fanContext) {
           const showFanKr = (langMode === "both" || langMode === "kr") && item.fanContext.kr;
           const showFanEn = (langMode === "both" || langMode === "en") && item.fanContext.en;
+          const contextHeader = item.type === "comment"
+            ? `${escapeHtml(item.fanContext.author)}'s Post`
+            : `Replying to ${escapeHtml(item.fanContext.author)}`;
 
           fanQuoteHtml = `
             <div class="fan-context">
-              <div class="fan-label">Replying to ${escapeHtml(item.fanContext.author)}</div>
+              <div class="fan-label">${contextHeader}</div>
               ${showFanKr ? `<div class="text-kr">${escapeHtml(item.fanContext.kr)}</div>` : ""}
               ${showFanEn ? `<div class="text-en">${escapeHtml(item.fanContext.en)}</div>` : ""}
               ${renderImages(item.fanContext.images, "Fan attachment")}
@@ -817,7 +766,6 @@
       langMode = e.target.value;
       renderFeed();
     });
-
 
     document.getElementById("searchInput").addEventListener("input", (e) => {
       searchQuery = e.target.value;
