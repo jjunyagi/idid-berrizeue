@@ -119,7 +119,6 @@
     .controls-row {
       display: flex;
       gap: 8px;
-      margin-bottom: 12px;
       flex-wrap: wrap;
     }
 
@@ -165,6 +164,14 @@
       padding: 18px;
     }
 
+    .card-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
     .card-type-label {
       display: inline-block;
       font-size: 0.7rem;
@@ -172,7 +179,6 @@
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: var(--text-muted);
-      margin-bottom: 12px;
     }
 
     .artist-header {
@@ -263,6 +269,7 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* Post / Comment Content */
     .content-block {
       margin-top: 12px;
       display: flex;
@@ -270,19 +277,48 @@
       gap: 8px;
     }
 
-    .text-kr {
-      font-family: 'Noto Sans KR', sans-serif;
+    .text-en {
       font-size: 0.95rem;
       color: var(--text-primary);
       white-space: pre-line;
     }
 
-    .text-en {
-      font-size: 0.94rem;
+    .text-kr {
+      font-family: 'Noto Sans KR', sans-serif;
+      font-size: 0.9rem;
       color: var(--text-secondary);
       white-space: pre-line;
-      padding-left: 11px;
+      padding: 9px 12px;
+      border-radius: 10px;
+      background: var(--bg-subcard);
       border-left: 2px solid var(--badge-purple);
+    }
+
+    .text-kr[hidden] {
+      display: none;
+    }
+
+    .original-toggle-btn {
+      align-self: flex-start;
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .original-toggle-btn:hover,
+    .original-toggle-btn[aria-expanded="true"] {
+      color: #ff80bd;
+      border-color: rgba(255, 0, 128, 0.45);
+      background: var(--accent-soft);
     }
 
     .media-grid {
@@ -329,15 +365,16 @@
       margin-bottom: 6px;
     }
 
-    .fan-context .text-kr {
+    .fan-context .text-en {
       font-size: 0.88rem;
-      color: #c7c7cc;
+      color: #d1d1d6;
     }
 
-    .fan-context .text-en {
-      font-size: 0.86rem;
-      color: #9e9ea6;
-      border-left-color: #48484f;
+    .fan-context .text-kr {
+      font-size: 0.85rem;
+      color: #b8b8c0;
+      background: var(--bg-card);
+      border-left-color: #636366;
       margin-top: 6px;
     }
 
@@ -349,7 +386,6 @@
       max-height: 260px;
     }
 
-    /* Threaded Fan Comments + Artist Replies inside a Post */
     .post-thread {
       margin-top: 16px;
       padding-top: 14px;
@@ -461,17 +497,12 @@
       </div>
 
       <div class="controls-row">
-        <input type="text" id="searchInput" class="search-input" placeholder="Search Korean, English translation, or date..." />
+        <input type="text" id="searchInput" class="search-input" placeholder="Search English translation, Korean text, or date..." />
         <select id="typeFilter" class="select-control">
           <option value="all">All Types</option>
           <option value="post">Posts</option>
           <option value="comment">Comments</option>
           <option value="reply">Replies</option>
-        </select>
-        <select id="langFilter" class="select-control">
-          <option value="both">KR + EN</option>
-          <option value="en">English Only</option>
-          <option value="kr">Korean Only</option>
         </select>
       </div>
     </div>
@@ -499,6 +530,7 @@
     };
 
     let ARCHIVE_DATA = [];
+    let originalToggleCounter = 0;
 
     function normalizeAvatarUrl(rawUrl) {
       let url = String(rawUrl || "").trim();
@@ -557,6 +589,17 @@
           <path d="M8.6 12.2L10.9 14.5L15.6 9.6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </span>
+    `;
+
+    const TRANSLATE_ICON_SVG = `
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m5 8 6 6" />
+        <path d="m4 14 6-6 2-3" />
+        <path d="M2 5h12" />
+        <path d="M7 2h1" />
+        <path d="m22 22-5-10-5 10" />
+        <path d="M14 18h6" />
+      </svg>
     `;
 
     function parseImageList(raw) {
@@ -689,8 +732,6 @@
 
     let activeMember = "all";
     let activeType = "all";
-    let langMode = "both";
-    let nameMode = "kr";
     let searchQuery = "";
 
     function escapeHtml(str) {
@@ -704,9 +745,7 @@
     function formatArtistName(memberKey) {
       const m = MEMBERS[memberKey];
       if (!m) return memberKey;
-      if (nameMode === "kr") return m.kr;
-      if (nameMode === "en") return m.en;
-      return `${m.kr} · ${m.en}`;
+      return m.en || m.kr || memberKey;
     }
 
     function renderArtistHeader(memberKey, date, compact = false) {
@@ -735,14 +774,29 @@
       `;
     }
 
-    function renderText(kr, en) {
-      const showKr = (langMode === "both" || langMode === "kr") && kr;
-      const showEn = (langMode === "both" || langMode === "en") && en;
-      if (!showKr && !showEn) return "";
+    function renderTextWithOriginal(kr, en) {
+      const primaryDisplay = en || kr;
+      const hasKoreanOriginal = Boolean(kr && kr.trim());
+      if (!primaryDisplay && !hasKoreanOriginal) return "";
 
+      const panelId = `orig-kr-${++originalToggleCounter}`;
       let html = `<div class="content-block">`;
-      if (showKr) html += `<div class="text-kr">${escapeHtml(kr)}</div>`;
-      if (showEn) html += `<div class="text-en">${escapeHtml(en)}</div>`;
+      if (primaryDisplay) {
+        html += `<div class="text-en">${escapeHtml(primaryDisplay)}</div>`;
+      }
+      if (hasKoreanOriginal) {
+        html += `
+          <button type="button"
+                  class="original-toggle-btn"
+                  aria-expanded="false"
+                  aria-controls="${panelId}"
+                  data-toggle-orig="${panelId}">
+            ${TRANSLATE_ICON_SVG}
+            <span>Show original text</span>
+          </button>
+          <div class="text-kr" id="${panelId}" hidden>${escapeHtml(kr)}</div>
+        `;
+      }
       html += `</div>`;
       return html;
     }
@@ -761,8 +815,9 @@
 
     function renderThreadItem(child) {
       const fan = child.fanContext;
-      const showFanKr = fan && (langMode === "both" || langMode === "kr") && fan.kr;
-      const showFanEn = fan && (langMode === "both" || langMode === "en") && fan.en;
+      const fanPrimary = fan ? (fan.en || fan.kr) : "";
+      const fanHasKr = Boolean(fan && fan.kr && fan.kr.trim());
+      const fanPanelId = `orig-kr-${++originalToggleCounter}`;
       const hasArtistReply = Boolean(child.kr || child.en || (child.images && child.images.length > 0));
 
       return `
@@ -773,8 +828,19 @@
                 <span class="fan-author">${escapeHtml(fan.author)}</span>
                 ${child.date ? `<span class="fan-date">${escapeHtml(child.date)}</span>` : ""}
               </div>
-              ${showFanKr ? `<div class="text-kr" style="margin-top:6px;">${escapeHtml(fan.kr)}</div>` : ""}
-              ${showFanEn ? `<div class="text-en" style="margin-top:6px;">${escapeHtml(fan.en)}</div>` : ""}
+              ${fanPrimary ? `<div class="text-en" style="margin-top:6px;">${escapeHtml(fanPrimary)}</div>` : ""}
+              ${fanHasKr ? `
+                <button type="button"
+                        class="original-toggle-btn"
+                        style="margin-top:8px;"
+                        aria-expanded="false"
+                        aria-controls="${fanPanelId}"
+                        data-toggle-orig="${fanPanelId}">
+                  ${TRANSLATE_ICON_SVG}
+                  <span>Show original text</span>
+                </button>
+                <div class="text-kr" id="${fanPanelId}" hidden>${escapeHtml(fan.kr)}</div>
+              ` : ""}
               ${renderImages(fan.images, "Fan comment attachment")}
             </div>
           ` : ""}
@@ -783,7 +849,7 @@
             <div class="${fan ? "artist-reply-nested" : ""}">
               <span class="reply-badge">Artist Reply</span>
               ${renderArtistHeader(child.member, child.date, true)}
-              ${renderText(child.kr, child.en)}
+              ${renderTextWithOriginal(child.kr, child.en)}
               ${renderImages(child.images, "Artist reply attachment")}
             </div>
           ` : ""}
@@ -792,6 +858,7 @@
     }
 
     function renderFeed() {
+      originalToggleCounter = 0;
       const container = document.getElementById("feedContainer");
       const q = searchQuery.trim().toLowerCase();
 
@@ -836,8 +903,9 @@
 
         let fanQuoteHtml = "";
         if (!item.threadItems?.length && item.fanContext) {
-          const showFanKr = (langMode === "both" || langMode === "kr") && item.fanContext.kr;
-          const showFanEn = (langMode === "both" || langMode === "en") && item.fanContext.en;
+          const fanPrimary = item.fanContext.en || item.fanContext.kr;
+          const fanHasKr = Boolean(item.fanContext.kr && item.fanContext.kr.trim());
+          const fanPanelId = `orig-kr-${++originalToggleCounter}`;
           const contextHeader = item.type === "comment"
             ? `${escapeHtml(item.fanContext.author)}'s Post`
             : `Replying to ${escapeHtml(item.fanContext.author)}`;
@@ -845,8 +913,19 @@
           fanQuoteHtml = `
             <div class="fan-context">
               <div class="fan-label">${contextHeader}</div>
-              ${showFanKr ? `<div class="text-kr">${escapeHtml(item.fanContext.kr)}</div>` : ""}
-              ${showFanEn ? `<div class="text-en">${escapeHtml(item.fanContext.en)}</div>` : ""}
+              ${fanPrimary ? `<div class="text-en">${escapeHtml(fanPrimary)}</div>` : ""}
+              ${fanHasKr ? `
+                <button type="button"
+                        class="original-toggle-btn"
+                        style="margin-top:8px;"
+                        aria-expanded="false"
+                        aria-controls="${fanPanelId}"
+                        data-toggle-orig="${fanPanelId}">
+                  ${TRANSLATE_ICON_SVG}
+                  <span>Show original text</span>
+                </button>
+                <div class="text-kr" id="${fanPanelId}" hidden>${escapeHtml(item.fanContext.kr)}</div>
+              ` : ""}
               ${renderImages(item.fanContext.images, "Fan attachment")}
             </div>
           `;
@@ -867,7 +946,7 @@
             <span class="card-type-label">${typeLabel}</span>
             ${fanQuoteHtml}
             ${renderArtistHeader(item.member, item.date)}
-            ${renderText(item.kr, item.en)}
+            ${renderTextWithOriginal(item.kr, item.en)}
             ${renderImages(item.images, "Artist attachment")}
             ${threadHtml}
           </article>
@@ -879,6 +958,22 @@
     const lightboxImg = document.getElementById("lightboxImg");
 
     document.getElementById("feedContainer").addEventListener("click", (e) => {
+      const toggleBtn = e.target.closest("[data-toggle-orig]");
+      if (toggleBtn) {
+        const targetId = toggleBtn.getAttribute("data-toggle-orig");
+        const krPanel = document.getElementById(targetId);
+        if (krPanel) {
+          const isOpen = !krPanel.hidden;
+          krPanel.hidden = isOpen;
+          toggleBtn.setAttribute("aria-expanded", String(!isOpen));
+          const labelSpan = toggleBtn.querySelector("span");
+          if (labelSpan) {
+            labelSpan.textContent = isOpen ? "Show original text" : "Hide original text";
+          }
+        }
+        return;
+      }
+
       const zoomSrc = e.target.getAttribute("data-zoom");
       if (!zoomSrc) return;
       lightboxImg.src = zoomSrc;
@@ -897,11 +992,6 @@
 
     document.getElementById("typeFilter").addEventListener("change", (e) => {
       activeType = e.target.value;
-      renderFeed();
-    });
-
-    document.getElementById("langFilter").addEventListener("change", (e) => {
-      langMode = e.target.value;
       renderFeed();
     });
 
