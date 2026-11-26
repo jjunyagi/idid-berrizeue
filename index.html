@@ -378,7 +378,6 @@
       max-height: 260px;
     }
 
-    /* Threaded Artist Comments & Replies */
     .post-thread {
       margin-top: 16px;
       padding-top: 14px;
@@ -710,7 +709,6 @@
           }
 
           const parent = itemsById.get(item.parentId);
-          // If parent is a comment/reply (or a row with fanContext), attach as a reply under that comment
           if (parent.type === "comment" || parent.type === "reply" || parent.fanContext) {
             parent.nestedReplies.push(item);
           } else {
@@ -815,12 +813,17 @@
     }
 
     function renderNestedArtistReply(replyObj) {
+      const deeperRepliesHtml = (replyObj.nestedReplies || [])
+        .map(renderNestedArtistReply)
+        .join("");
+
       return `
         <div class="artist-reply-nested">
           <span class="reply-badge">Artist Reply</span>
           ${renderArtistHeader(replyObj.member, replyObj.date, true)}
           ${renderTextWithOriginal(replyObj.kr, replyObj.en)}
           ${renderImages(replyObj.images, "Artist reply attachment")}
+          ${deeperRepliesHtml}
         </div>
       `;
     }
