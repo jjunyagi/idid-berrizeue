@@ -181,13 +181,13 @@
     }
 
     .artist-header.compact .artist-avatar-wrap {
-      width: 34px;
-      height: 34px;
-      flex: 0 0 34px;
+      width: 36px;
+      height: 36px;
+      flex: 0 0 36px;
     }
 
     .artist-header.compact .artist-name {
-      font-size: 0.9rem;
+      font-size: 0.92rem;
     }
 
     .artist-avatar-wrap {
@@ -378,6 +378,43 @@
       max-height: 260px;
     }
 
+    /* Additional Artist Comments on the same Fan Post */
+    .extra-artist-comment {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .comment-badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    /* Reply under a specific Artist Comment */
+    .artist-reply-nested {
+      margin-top: 12px;
+      padding-top: 12px;
+      padding-left: 14px;
+      border-top: 1px dashed var(--border-subtle);
+      border-left: 2px solid var(--badge-purple);
+    }
+
+    .reply-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #ff80bd;
+      margin-bottom: 8px;
+    }
+
+    /* Threaded Fan Comments + Artist Replies under an Artist Post */
     .post-thread {
       margin-top: 16px;
       padding-top: 14px;
@@ -412,24 +449,6 @@
       font-size: 0.75rem;
       color: var(--text-muted);
       margin-left: 6px;
-    }
-
-    .artist-reply-nested {
-      margin-top: 10px;
-      padding-top: 10px;
-      padding-left: 12px;
-      border-top: 1px dashed var(--border-subtle);
-      border-left: 2px solid var(--badge-purple);
-    }
-
-    .reply-badge {
-      display: inline-block;
-      font-size: 0.68rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #ff80bd;
-      margin-bottom: 6px;
     }
 
     .lightbox {
@@ -690,6 +709,7 @@
                 images: fanImages
               } : null,
               threadItems: [],
+              coComments: [],
               nestedReplies: []
             };
           });
@@ -709,9 +729,14 @@
           }
 
           const parent = itemsById.get(item.parentId);
-          if (parent.type === "comment" || parent.type === "reply" || parent.fanContext) {
+          // Another artist comment on the same fan post: attach as co-comment at the same comment level
+          if (item.type === "comment" && (parent.type === "comment" || parent.fanContext)) {
+            parent.coComments.push(item);
+          } else if (parent.type === "comment" || parent.type === "reply" || parent.fanContext) {
+            // A reply to an artist comment: attach as nested reply under that comment
             parent.nestedReplies.push(item);
           } else {
+            // A comment/reply on an artist post
             parent.threadItems.push(item);
           }
         });
@@ -828,6 +853,26 @@
       `;
     }
 
+    function renderCoCommentBlock(commentObj) {
+      const repliesHtml = (commentObj.nestedReplies || [])
+        .map(renderNestedArtistReply)
+        .join("");
+      const moreCoCommentsHtml = (commentObj.coComments || [])
+        .map(renderCoCommentBlock)
+        .join("");
+
+      return `
+        <div class="extra-artist-comment">
+          <span class="comment-badge">Artist Comment</span>
+          ${renderArtistHeader(commentObj.member, commentObj.date, false)}
+          ${renderTextWithOriginal(commentObj.kr, commentObj.en)}
+          ${renderImages(commentObj.images, "Artist comment attachment")}
+          ${repliesHtml}
+        </div>
+        ${moreCoCommentsHtml}
+      `;
+    }
+
     function renderThreadItem(child) {
       const fan = child.fanContext;
       const fanPrimary = fan ? (fan.en || fan.kr) : "";
@@ -835,6 +880,7 @@
       const fanPanelId = `orig-kr-${++originalToggleCounter}`;
       const hasArtistContent = Boolean(child.kr || child.en || (child.images && child.images.length > 0));
       const repliesHtml = (child.nestedReplies || []).map(renderNestedArtistReply).join("");
+      const coCommentsHtml = (child.coComments || []).map(renderCoCommentBlock).join("");
 
       return `
         <div class="thread-item">
@@ -871,6 +917,7 @@
           ` : ""}
 
           ${repliesHtml}
+          ${coCommentsHtml}
         </div>
       `;
     }
@@ -879,6 +926,7 @@
       if (member === "all") return true;
       if (item.member === member) return true;
       if (item.threadItems?.some(c => itemInvolvesMember(c, member))) return true;
+      if (item.coComments?.some(c => itemInvolvesMember(c, member))) return true;
       if (item.nestedReplies?.some(r => itemInvolvesMember(r, member))) return true;
       return false;
     }
@@ -896,8 +944,9 @@
         item.fanContext?.en
       ];
       const fromThread = (item.threadItems || []).flatMap(collectSearchableStrings);
+      const fromCoComments = (item.coComments || []).flatMap(collectSearchableStrings);
       const fromReplies = (item.nestedReplies || []).flatMap(collectSearchableStrings);
-      return [...base, ...fromThread, ...fromReplies].filter(Boolean);
+      return [...base, ...fromThread, ...fromCoComments, ...fromReplies].filter(Boolean);
     }
 
     function renderFeed() {
@@ -956,6 +1005,7 @@
         }
 
         const nestedRepliesOnMainHtml = (item.nestedReplies || []).map(renderNestedArtistReply).join("");
+        const coCommentsOnMainHtml = (item.coComments || []).map(renderCoCommentBlock).join("");
 
         let threadHtml = "";
         if (item.threadItems && item.threadItems.length > 0) {
@@ -975,6 +1025,7 @@
             ${renderTextWithOriginal(item.kr, item.en)}
             ${renderImages(item.images, "Artist attachment")}
             ${nestedRepliesOnMainHtml}
+            ${coCommentsOnMainHtml}
             ${threadHtml}
           </article>
         `;
