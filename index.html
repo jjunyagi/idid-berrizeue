@@ -164,14 +164,6 @@
       padding: 18px;
     }
 
-    .card-top-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
     .card-type-label {
       display: inline-block;
       font-size: 0.7rem;
@@ -179,6 +171,7 @@
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: var(--text-muted);
+      margin-bottom: 12px;
     }
 
     .artist-header {
@@ -269,7 +262,6 @@
       font-variant-numeric: tabular-nums;
     }
 
-    /* Post / Comment Content */
     .content-block {
       margin-top: 12px;
       display: flex;
@@ -386,6 +378,7 @@
       max-height: 260px;
     }
 
+    /* Threaded Artist Comments & Replies */
     .post-thread {
       margin-top: 16px;
       padding-top: 14px;
@@ -697,23 +690,31 @@
                 en: fanEn,
                 images: fanImages
               } : null,
-              threadItems: []
+              threadItems: [],
+              nestedReplies: []
             };
           });
 
-        const postsById = new Map();
+        const itemsById = new Map();
         parsedRows.forEach(item => {
-          if (item.id && !item.parentId) {
-            postsById.set(item.id, item);
+          if (item.id) {
+            itemsById.set(item.id, item);
           }
         });
 
         const topLevelItems = [];
         parsedRows.forEach(item => {
-          if (item.parentId && postsById.has(item.parentId)) {
-            postsById.get(item.parentId).threadItems.push(item);
-          } else {
+          if (!item.parentId || !itemsById.has(item.parentId)) {
             topLevelItems.push(item);
+            return;
+          }
+
+          const parent = itemsById.get(item.parentId);
+          // If parent is a comment/reply (or a row with fanContext), attach as a reply under that comment
+          if (parent.type === "comment" || parent.type === "reply" || parent.fanContext) {
+            parent.nestedReplies.push(item);
+          } else {
+            parent.threadItems.push(item);
           }
         });
 
@@ -813,12 +814,24 @@
       `;
     }
 
+    function renderNestedArtistReply(replyObj) {
+      return `
+        <div class="artist-reply-nested">
+          <span class="reply-badge">Artist Reply</span>
+          ${renderArtistHeader(replyObj.member, replyObj.date, true)}
+          ${renderTextWithOriginal(replyObj.kr, replyObj.en)}
+          ${renderImages(replyObj.images, "Artist reply attachment")}
+        </div>
+      `;
+    }
+
     function renderThreadItem(child) {
       const fan = child.fanContext;
       const fanPrimary = fan ? (fan.en || fan.kr) : "";
       const fanHasKr = Boolean(fan && fan.kr && fan.kr.trim());
       const fanPanelId = `orig-kr-${++originalToggleCounter}`;
-      const hasArtistReply = Boolean(child.kr || child.en || (child.images && child.images.length > 0));
+      const hasArtistContent = Boolean(child.kr || child.en || (child.images && child.images.length > 0));
+      const repliesHtml = (child.nestedReplies || []).map(renderNestedArtistReply).join("");
 
       return `
         <div class="thread-item">
@@ -845,16 +858,43 @@
             </div>
           ` : ""}
 
-          ${hasArtistReply ? `
+          ${hasArtistContent ? `
             <div class="${fan ? "artist-reply-nested" : ""}">
-              <span class="reply-badge">Artist Reply</span>
+              <span class="reply-badge">${child.type === "comment" ? "Artist Comment" : "Artist Reply"}</span>
               ${renderArtistHeader(child.member, child.date, true)}
               ${renderTextWithOriginal(child.kr, child.en)}
-              ${renderImages(child.images, "Artist reply attachment")}
+              ${renderImages(child.images, "Artist attachment")}
             </div>
           ` : ""}
+
+          ${repliesHtml}
         </div>
       `;
+    }
+
+    function itemInvolvesMember(item, member) {
+      if (member === "all") return true;
+      if (item.member === member) return true;
+      if (item.threadItems?.some(c => itemInvolvesMember(c, member))) return true;
+      if (item.nestedReplies?.some(r => itemInvolvesMember(r, member))) return true;
+      return false;
+    }
+
+    function collectSearchableStrings(item) {
+      const memberInfo = MEMBERS[item.member];
+      const base = [
+        item.kr,
+        item.en,
+        item.date,
+        memberInfo?.kr,
+        memberInfo?.en,
+        item.fanContext?.author,
+        item.fanContext?.kr,
+        item.fanContext?.en
+      ];
+      const fromThread = (item.threadItems || []).flatMap(collectSearchableStrings);
+      const fromReplies = (item.nestedReplies || []).flatMap(collectSearchableStrings);
+      return [...base, ...fromThread, ...fromReplies].filter(Boolean);
     }
 
     function renderFeed() {
@@ -863,32 +903,13 @@
       const q = searchQuery.trim().toLowerCase();
 
       const filtered = ARCHIVE_DATA.filter(item => {
-        const threadMatchesMember = activeMember === "all" ||
-          item.member === activeMember ||
-          (item.threadItems && item.threadItems.some(c => c.member === activeMember));
-
+        const matchesMember = itemInvolvesMember(item, activeMember);
         const matchesType = activeType === "all" || item.type === activeType;
 
-        if (!threadMatchesMember || !matchesType) return false;
+        if (!matchesMember || !matchesType) return false;
         if (!q) return true;
 
-        const memberInfo = MEMBERS[item.member];
-        const threadText = (item.threadItems || []).flatMap(c => [
-          c.kr, c.en, c.fanContext?.author, c.fanContext?.kr, c.fanContext?.en
-        ]);
-
-        const searchable = [
-          item.kr,
-          item.en,
-          item.date,
-          memberInfo?.kr,
-          memberInfo?.en,
-          item.fanContext?.kr,
-          item.fanContext?.en,
-          ...threadText
-        ].filter(Boolean).join(" ").toLowerCase();
-
-        return searchable.includes(q);
+        return collectSearchableStrings(item).join(" ").toLowerCase().includes(q);
       });
 
       if (filtered.length === 0) {
@@ -931,6 +952,8 @@
           `;
         }
 
+        const nestedRepliesOnMainHtml = (item.nestedReplies || []).map(renderNestedArtistReply).join("");
+
         let threadHtml = "";
         if (item.threadItems && item.threadItems.length > 0) {
           threadHtml = `
@@ -948,6 +971,7 @@
             ${renderArtistHeader(item.member, item.date)}
             ${renderTextWithOriginal(item.kr, item.en)}
             ${renderImages(item.images, "Artist attachment")}
+            ${nestedRepliesOnMainHtml}
             ${threadHtml}
           </article>
         `;
